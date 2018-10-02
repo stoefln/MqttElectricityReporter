@@ -24,7 +24,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="tcp://192.168.0.24:1888"
+            android:text="tcp://192.168.0.24:1883"
             android:textSize="12sp"/>
 
     </TableRow>

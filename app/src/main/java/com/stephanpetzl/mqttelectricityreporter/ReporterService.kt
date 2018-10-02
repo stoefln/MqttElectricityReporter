@@ -3,6 +3,8 @@ package com.stephanpetzl.mqttelectricityreporter
 import android.arch.lifecycle.LifecycleService
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.widget.Toast
 import com.squareup.otto.Subscribe
 import com.stephanpetzl.mqttaudioplayer.event.OnConnectedEvent
@@ -13,7 +15,9 @@ import com.stephanpetzl.mqttelectricityreporter.event.OnStartReporterServiceEven
 import com.stephanpetzl.mqttelectricityreporter.event.OnStatusEvent
 import org.eclipse.paho.android.service.MqttAndroidClient
 import org.eclipse.paho.client.mqttv3.*
+import timber.log.Timber
 import java.nio.charset.Charset
+
 
 class ReporterService : LifecycleService() {
 
@@ -23,11 +27,51 @@ class ReporterService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
-            MainBus.instance.register(this)
+            MainBus.register(this)
         } catch (e: IllegalArgumentException){
             // ignore error about double registering
         }
+        init()
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    private var loopThread: Thread? = null
+    private var wasCharging = false
+
+    private fun init() {
+        val checkRunnable = Runnable {
+            while (!Thread.interrupted())
+                try {
+                    Thread.sleep(1000)
+
+
+                    val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { ifilter ->
+                        applicationContext.registerReceiver(null, ifilter)
+                    }
+
+                    val status: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                    val isCharging: Boolean = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+                    val chargePlug: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1) ?: -1
+                    val usbCharge: Boolean = chargePlug == BatteryManager.BATTERY_PLUGGED_USB
+                    val acCharge: Boolean = chargePlug == BatteryManager.BATTERY_PLUGGED_AC
+                    Timber.d("isCharging: $isCharging, status: $status, chargePlug: $chargePlug, usbCharge: $usbCharge, acCharge: $acCharge")
+                    if(isCharging != wasCharging){
+                        if(isCharging) {
+                            MainBus.post(OnPowerOnEvent())
+                        } else {
+                            MainBus.post(OnPowerOffEvent())
+                        }
+                    }
+                    wasCharging = isCharging
+                } catch (e: InterruptedException) {
+
+                }
+        }
+        if (loopThread != null) {
+            loopThread!!.interrupt()
+        }
+        loopThread = Thread(checkRunnable)
+        loopThread!!.start()
     }
 
     @Subscribe
@@ -52,12 +96,12 @@ class ReporterService : LifecycleService() {
                 } else {
                     sendStatus("Connected to: $serverURI")
                 }
-                MainBus.instance.post(OnConnectedEvent())
+                MainBus.post(OnConnectedEvent())
             }
 
             override fun connectionLost(cause: Throwable) {
                 sendStatus("The Connection was lost.")
-                MainBus.instance.post(OnDisconnectedEvent())
+                MainBus.post(OnDisconnectedEvent())
             }
 
             @Throws(Exception::class)
@@ -89,7 +133,7 @@ class ReporterService : LifecycleService() {
 
                 override fun onFailure(asyncActionToken: IMqttToken, exception: Throwable) {
                     sendStatus("Failed to connect to: $serverUri")
-                    MainBus.instance.post(OnDisconnectedEvent())
+                    MainBus.post(OnDisconnectedEvent())
                 }
             })
 
@@ -100,7 +144,8 @@ class ReporterService : LifecycleService() {
     }
 
     private fun sendStatus(message: String) {
-        MainBus.instance.post(OnStatusEvent(message))
+        Timber.d("Status: $message")
+        MainBus.post(OnStatusEvent(message))
     }
 
 
