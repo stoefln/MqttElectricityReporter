@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">MqttElectricityReporter</string>
+    <string name="preference_file_key">main_prefs</string>
+</resources>
